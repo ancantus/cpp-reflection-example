@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <utility>
 #include "pack.hpp"
+#include "print.hpp"
 
 struct TestStruct
 {
@@ -36,8 +37,12 @@ int main()
 	TestStruct testStruct{true, 42, 3.5};
 	std::array<uint8_t, packed_size<TestStruct>()> testStructBytes{};
 	pack(testStruct, testStructBytes);
+	std::println("TestStruct bytes:");
+	print_hex_dump(testStructBytes);
 
 	Nested nested{{7}, {11}, {1.25F, 2.5F}};
 	std::array<uint8_t, packed_size<Nested>()> nestedBytes{};
 	pack(nested, nestedBytes);
+	std::println("Nested bytes:");
+	print_hex_dump(nestedBytes);
 }
