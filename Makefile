@@ -11,7 +11,7 @@ all: $(TARGETS)
 enum: enum.cpp utils.hpp
 	$(CXX) $(CXXFLAGS) $< -o $@
 
-pack: pack_test.cpp pack.hpp print.hpp utils.hpp
+pack: pack_test.cpp leyline.hpp leyline_impl.hpp print.hpp utils.hpp
 	$(CXX) $(CXXFLAGS) $< -o $@
 
 id_of: id_of.cpp
