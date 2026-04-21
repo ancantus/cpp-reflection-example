@@ -9,8 +9,28 @@
 #include <type_traits>
 #include <utility>
 
-#include "leyline_impl.hpp"
 #include "utils.hpp"
+
+namespace leyline::wire
+{
+enum class byte_order : std::uint8_t
+{
+    little,
+    big
+};
+
+struct endian
+{
+    byte_order value;
+
+    constexpr bool operator==(const endian&) const noexcept = default;
+};
+
+inline constexpr endian little{byte_order::little};
+inline constexpr endian big{byte_order::big};
+} // namespace leyline::wire
+
+#include "leyline_impl.hpp"
 
 namespace leyline
 {

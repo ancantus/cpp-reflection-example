@@ -37,6 +37,24 @@ struct Nested
 	bool operator==(const Nested&) const noexcept = default;
 };
 
+struct [[=leyline::wire::big]] PacketHeader
+{
+	std::uint16_t messageType;
+	[[=leyline::wire::little]] std::uint16_t revision;
+
+	bool operator==(const PacketHeader&) const noexcept = default;
+};
+
+struct NetworkPacket
+{
+	std::uint16_t preamble;
+	[[=leyline::wire::big]] std::uint16_t payloadLength;
+	PacketHeader header;
+	std::uint32_t checksum;
+
+	bool operator==(const NetworkPacket&) const noexcept = default;
+};
+
 int main()
 {
 	TestStruct testStruct{true, 42, 3.5};
@@ -62,6 +80,46 @@ int main()
 	if (nested != unpackedNested)
 	{
 		std::println("Nested roundtrip failed");
+		return 1;
+	}
+
+	NetworkPacket packet{
+		.preamble = 0x1234,
+		.payloadLength = 0xABCD,
+		.header = {.messageType = 0x3456, .revision = 0x789A},
+		.checksum = 0x01020304,
+	};
+	std::array<std::uint8_t, leyline::packed_size<NetworkPacket>()> packetBytes{};
+	constexpr std::array<std::uint8_t, leyline::packed_size<NetworkPacket>()> expectedPacketBytes{
+		0x34,
+		0x12,
+		0xAB,
+		0xCD,
+		0x34,
+		0x56,
+		0x9A,
+		0x78,
+		0x04,
+		0x03,
+		0x02,
+		0x01,
+	};
+
+	std::println("NetworkPacket Size: {}, PackedSize: {}", sizeof(NetworkPacket), packetBytes.size());
+	leyline::pack(packet, packetBytes);
+	std::println("NetworkPacket bytes:");
+	print_hex_dump(packetBytes);
+
+	if (packetBytes != expectedPacketBytes)
+	{
+		std::println("NetworkPacket byte order check failed");
+		return 1;
+	}
+
+	const auto unpackedPacket = leyline::unpack<NetworkPacket>(packetBytes);
+	if (packet != unpackedPacket)
+	{
+		std::println("NetworkPacket roundtrip failed");
 		return 1;
 	}
 
