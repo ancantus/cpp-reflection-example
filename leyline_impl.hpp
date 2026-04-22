@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -76,6 +77,120 @@ constexpr void pack_impl(const T& input, OutIt& output);
 
 template <wire::byte_order Order, typename InIt, typename T>
 constexpr void unpack_impl(T& output, InIt& input);
+
+template <typename T>
+struct checksum_region_annotation_traits
+{
+    static constexpr bool is_annotation = false;
+    using region_tag = void;
+};
+
+template <typename RegionTag>
+struct checksum_region_annotation_traits<checksum_region<RegionTag>>
+{
+    static constexpr bool is_annotation = true;
+    using region_tag = RegionTag;
+};
+
+template <typename T>
+inline constexpr bool is_checksum_region_annotation_v =
+    checksum_region_annotation_traits<std::remove_cvref_t<T>>::is_annotation;
+
+template <typename T>
+struct checksum_field_annotation_traits
+{
+    static constexpr bool is_annotation = false;
+    using algo_tag = void;
+    using region_tag = void;
+};
+
+template <typename AlgoTag, typename RegionTag>
+struct checksum_field_annotation_traits<checksum_field<AlgoTag, RegionTag>>
+{
+    static constexpr bool is_annotation = true;
+    using algo_tag = AlgoTag;
+    using region_tag = RegionTag;
+};
+
+template <typename T>
+inline constexpr bool is_checksum_field_annotation_v =
+    checksum_field_annotation_traits<std::remove_cvref_t<T>>::is_annotation;
+
+using checksum_writer_fn = void (*)(std::span<const std::byte>, std::byte*);
+
+struct checksum_region_entry
+{
+    bool present = false;
+    std::string_view region_tag = {};
+    std::uint16_t region_id = ::leyline::checksum_region_id_unspecified;
+    std::size_t byte_offset = 0U;
+    std::size_t byte_size = 0U;
+};
+
+struct checksum_field_entry
+{
+    bool present = false;
+    std::string_view region_tag = {};
+    std::uint16_t region_id = ::leyline::checksum_region_id_unspecified;
+    std::size_t byte_offset = 0U;
+    std::size_t byte_size = 0U;
+    checksum_writer_fn writer = nullptr;
+};
+
+template <typename Tag>
+consteval std::string_view checksum_tag_name()
+{
+    return std::meta::display_string_of(^^Tag);
+}
+
+template <wire::byte_order Order, typename AlgoTag>
+constexpr void write_checksum_value(std::span<const std::byte> region_bytes, std::byte* destination)
+{
+    using Traits = ::leyline::checksum_traits<AlgoTag>;
+    using ValueType = typename Traits::value_type;
+
+    const ValueType checksum_value = Traits::compute(region_bytes);
+    auto out_it = destination;
+    pack_impl<Order>(checksum_value, out_it);
+}
+
+template <std::size_t MemberCount>
+constexpr std::size_t find_next_matching_region(
+    const std::array<checksum_region_entry, MemberCount>& regions,
+    std::size_t field_index,
+    const checksum_field_entry& field
+)
+{
+    for (std::size_t region_index = field_index + 1U; region_index < MemberCount; ++region_index)
+    {
+        const checksum_region_entry& region = regions[region_index];
+        if (!region.present)
+        {
+            continue;
+        }
+
+        if (region.region_tag != field.region_tag)
+        {
+            continue;
+        }
+
+        if (field.region_id == ::leyline::checksum_region_id_unspecified)
+        {
+            if (region.region_id != ::leyline::checksum_region_id_unspecified)
+            {
+                continue;
+            }
+        }
+        else if (region.region_id != field.region_id)
+        {
+            continue;
+        }
+
+        return region_index;
+    }
+
+    return MemberCount;
+}
 
 consteval wire::byte_order resolved_byte_order(std::meta::info subject, wire::byte_order fallback)
 {
@@ -215,11 +330,109 @@ constexpr void pack_impl(const T& input, OutIt& output)
     else if constexpr (std::is_class_v<T>)
     {
         constexpr auto ctx = std::meta::access_context::current();
+        constexpr std::size_t member_count = nonstatic_data_members_of<T>(ctx).size();
         constexpr auto type_order = resolved_byte_order(^^T, Order);
+
+        std::array<std::byte, ::leyline::packed_size<T>()> packed_members{};
+        std::array<checksum_region_entry, member_count> regions{};
+        std::array<checksum_field_entry, member_count> fields{};
+
+        std::size_t byte_offset = 0U;
+        std::size_t member_index = 0U;
+        auto member_output = packed_members.begin();
+
         template for (constexpr auto m : nonstatic_data_members_of<T>(ctx))
         {
+            using MemberType = typename[: std::meta::type_of(m) :];
+            constexpr std::size_t member_size = ::leyline::packed_size<MemberType>();
             constexpr auto member_order = resolved_byte_order(m, type_order);
-            pack_impl<member_order>(input.[:m:], output);
+
+            template for (constexpr auto annotation : std::define_static_array(std::meta::annotations_of(m)))
+            {
+                using AnnotationType = typename[: std::meta::type_of(annotation) :];
+
+                if constexpr (is_checksum_region_annotation_v<AnnotationType>)
+                {
+                    using NormalizedAnnotationType = std::remove_cvref_t<AnnotationType>;
+                    using RegionTag = typename checksum_region_annotation_traits<NormalizedAnnotationType>::region_tag;
+                    constexpr auto config = std::meta::extract<NormalizedAnnotationType>(annotation);
+
+                    checksum_region_entry& region = regions[member_index];
+                    if (region.present)
+                    {
+                        std::abort();
+                    }
+
+                    region.present = true;
+                    region.region_tag = checksum_tag_name<RegionTag>();
+                    region.region_id = config.region_id;
+                    region.byte_offset = byte_offset;
+                    region.byte_size = member_size;
+                }
+                else if constexpr (is_checksum_field_annotation_v<AnnotationType>)
+                {
+                    using NormalizedAnnotationType = std::remove_cvref_t<AnnotationType>;
+                    using AlgoTag = typename checksum_field_annotation_traits<NormalizedAnnotationType>::algo_tag;
+                    using RegionTag = typename checksum_field_annotation_traits<NormalizedAnnotationType>::region_tag;
+                    using ChecksumType = typename ::leyline::checksum_traits<AlgoTag>::value_type;
+
+                    static_assert(
+                        ::leyline::packed_size<MemberType>() == ::leyline::packed_size<ChecksumType>(),
+                        "checksum_field member size must match checksum_traits<AlgoTag>::value_type size."
+                    );
+
+                    checksum_field_entry& field = fields[member_index];
+                    if (field.present)
+                    {
+                        std::abort();
+                    }
+
+                    constexpr auto config = std::meta::extract<NormalizedAnnotationType>(annotation);
+                    field.present = true;
+                    field.region_tag = checksum_tag_name<RegionTag>();
+                    field.region_id = config.region_id;
+                    field.byte_offset = byte_offset;
+                    field.byte_size = member_size;
+                    field.writer = &write_checksum_value<member_order, AlgoTag>;
+                }
+            }
+
+            pack_impl<member_order>(input.[:m:], member_output);
+
+            byte_offset += member_size;
+            ++member_index;
+        }
+
+        for (std::size_t field_index = 0U; field_index < member_count; ++field_index)
+        {
+            const checksum_field_entry& field = fields[field_index];
+            if (!field.present)
+            {
+                continue;
+            }
+
+            if (field.writer == nullptr)
+            {
+                std::abort();
+            }
+
+            const std::size_t region_index = find_next_matching_region(regions, field_index, field);
+            if (region_index == member_count)
+            {
+                std::abort();
+            }
+
+            const checksum_region_entry& region = regions[region_index];
+            const auto all_bytes = std::span<const std::byte>{packed_members};
+            const auto region_bytes = all_bytes.subspan(region.byte_offset, region.byte_size);
+            field.writer(region_bytes, packed_members.data() + field.byte_offset);
+        }
+
+        using OutputType = std::remove_cvref_t<std::iter_value_t<OutIt>>;
+        for (std::byte byte : packed_members)
+        {
+            *output = static_cast<OutputType>(byte);
+            ++output;
         }
     }
     else

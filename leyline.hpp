@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -35,6 +36,63 @@ inline constexpr endian big{byte_order::big};
 
 namespace leyline
 {
+struct default_checksum_region_tag
+{
+};
+
+inline constexpr std::uint16_t checksum_region_id_unspecified = std::numeric_limits<std::uint16_t>::max();
+
+template <typename RegionTag = default_checksum_region_tag>
+struct checksum_region
+{
+    std::uint16_t region_id = checksum_region_id_unspecified;
+
+    constexpr bool operator==(const checksum_region&) const noexcept = default;
+};
+
+template <typename AlgoTag, typename RegionTag = default_checksum_region_tag>
+struct checksum_field
+{
+    std::uint16_t region_id = checksum_region_id_unspecified;
+
+    constexpr bool operator==(const checksum_field&) const noexcept = default;
+};
+
+struct crc32_ieee_tag
+{
+};
+
+template <typename RegionTag = default_checksum_region_tag>
+using checksum_field_crc32 = checksum_field<crc32_ieee_tag, RegionTag>;
+
+template <typename AlgoTag>
+struct checksum_traits;
+
+template <>
+struct checksum_traits<crc32_ieee_tag>
+{
+    using value_type = std::uint32_t;
+
+    static constexpr value_type compute(std::span<const std::byte> bytes) noexcept
+    {
+        std::uint32_t crc = 0xFFFFFFFFU;
+        for (std::byte byte : bytes)
+        {
+            crc ^= static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(byte));
+            for (int bit = 0; bit < 8; ++bit)
+            {
+                const std::uint32_t needs_poly = crc & 1U;
+                crc >>= 1U;
+                if (needs_poly != 0U)
+                {
+                    crc ^= 0xEDB88320U;
+                }
+            }
+        }
+        return crc ^ 0xFFFFFFFFU;
+    }
+};
+
 template <typename T>
 consteval std::size_t packed_size();
 } // namespace leyline

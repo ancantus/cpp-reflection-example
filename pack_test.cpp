@@ -65,6 +65,37 @@ struct IndirectFixedTypes
 	std::span<std::uint16_t, 2> window;
 };
 
+struct CrcPayload
+{
+	std::uint16_t first;
+	std::uint16_t second;
+};
+
+struct CrcMessageDefault
+{
+	std::uint16_t magic;
+	[[=leyline::checksum_field_crc32{}]] std::uint32_t crc;
+	[[=leyline::checksum_region{}]] CrcPayload payload;
+};
+
+struct payload_region_tag
+{
+};
+
+struct CrcMessageTagged
+{
+	std::uint16_t magic;
+	[[=leyline::checksum_field_crc32<payload_region_tag>{}]] std::uint32_t crc;
+	[[=leyline::checksum_region<payload_region_tag>{}]] CrcPayload payload;
+};
+
+struct CrcMessageById
+{
+	std::uint16_t magic;
+	[[=leyline::checksum_field_crc32{.region_id = 7}]] std::uint32_t crc;
+	[[=leyline::checksum_region{.region_id = 7}]] CrcPayload payload;
+};
+
 int main()
 {
 	TestStruct testStruct{true, 42, 3.5};
@@ -177,6 +208,8 @@ int main()
 	};
 	std::array<std::uint8_t, leyline::packed_size<IndirectFixedTypes>()> nullableIndirectBytes{};
 	leyline::pack(nullableIndirect, nullableIndirectBytes);
+	std::println("IndirectFixedTypes nullable bytes:");
+	print_hex_dump(nullableIndirectBytes);
 
 	std::uint16_t pointerThatWillBeCleared = 0xFFFF;
 	std::array<std::uint16_t, 2> unpackedNullSpanBacking{};
@@ -193,6 +226,117 @@ int main()
 		nullSpanBacking != unpackedNullSpanBacking)
 	{
 		std::println("IndirectFixedTypes nullable roundtrip failed");
+		return 1;
+	}
+
+	constexpr std::uint32_t expectedCrc32 = 0x1D5E9AF9U;
+	CrcPayload crcPayload{.first = 0x1122, .second = 0x3344};
+
+	CrcMessageDefault crcDefault{
+		.magic = 0x1234,
+		.crc = 0x0,
+		.payload = crcPayload,
+	};
+	std::array<std::uint8_t, leyline::packed_size<CrcMessageDefault>()> crcDefaultBytes{};
+	constexpr std::array<std::uint8_t, leyline::packed_size<CrcMessageDefault>()> expectedCrcDefaultBytes{
+		0x34,
+		0x12,
+		0xF9,
+		0x9A,
+		0x5E,
+		0x1D,
+		0x22,
+		0x11,
+		0x44,
+		0x33,
+	};
+	leyline::pack(crcDefault, crcDefaultBytes);
+	std::println("CrcMessageDefault bytes:");
+	print_hex_dump(crcDefaultBytes);
+	if (crcDefaultBytes != expectedCrcDefaultBytes)
+	{
+		std::println("CRC default region packing failed");
+		return 1;
+	}
+	const auto unpackedCrcDefault = leyline::unpack<CrcMessageDefault>(crcDefaultBytes);
+	if (unpackedCrcDefault.magic != crcDefault.magic ||
+		unpackedCrcDefault.crc != expectedCrc32 ||
+		unpackedCrcDefault.payload.first != crcPayload.first ||
+		unpackedCrcDefault.payload.second != crcPayload.second)
+	{
+		std::println("CRC default region roundtrip failed");
+		return 1;
+	}
+
+	CrcMessageTagged crcTagged{
+		.magic = 0x5566,
+		.crc = 0x0,
+		.payload = crcPayload,
+	};
+	std::array<std::uint8_t, leyline::packed_size<CrcMessageTagged>()> crcTaggedBytes{};
+	constexpr std::array<std::uint8_t, leyline::packed_size<CrcMessageTagged>()> expectedCrcTaggedBytes{
+		0x66,
+		0x55,
+		0xF9,
+		0x9A,
+		0x5E,
+		0x1D,
+		0x22,
+		0x11,
+		0x44,
+		0x33,
+	};
+	leyline::pack(crcTagged, crcTaggedBytes);
+	std::println("CrcMessageTagged bytes:");
+	print_hex_dump(crcTaggedBytes);
+	if (crcTaggedBytes != expectedCrcTaggedBytes)
+	{
+		std::println("CRC tagged region packing failed");
+		return 1;
+	}
+	const auto unpackedCrcTagged = leyline::unpack<CrcMessageTagged>(crcTaggedBytes);
+	if (unpackedCrcTagged.magic != crcTagged.magic ||
+		unpackedCrcTagged.crc != expectedCrc32 ||
+		unpackedCrcTagged.payload.first != crcPayload.first ||
+		unpackedCrcTagged.payload.second != crcPayload.second)
+	{
+		std::println("CRC tagged region roundtrip failed");
+		return 1;
+	}
+
+	CrcMessageById crcById{
+		.magic = 0x7788,
+		.crc = 0x0,
+		.payload = crcPayload,
+	};
+	std::array<std::uint8_t, leyline::packed_size<CrcMessageById>()> crcByIdBytes{};
+	constexpr std::array<std::uint8_t, leyline::packed_size<CrcMessageById>()> expectedCrcByIdBytes{
+		0x88,
+		0x77,
+		0xF9,
+		0x9A,
+		0x5E,
+		0x1D,
+		0x22,
+		0x11,
+		0x44,
+		0x33,
+	};
+	leyline::pack(crcById, crcByIdBytes);
+	std::println("CrcMessageById bytes:");
+	print_hex_dump(crcByIdBytes);
+	if (crcByIdBytes != expectedCrcByIdBytes)
+	{
+		std::println("CRC region_id packing failed");
+		return 1;
+	}
+	const auto unpackedCrcById = leyline::unpack<CrcMessageById>(crcByIdBytes);
+	if (unpackedCrcById.magic != crcById.magic ||
+		unpackedCrcById.crc != expectedCrc32 ||
+		unpackedCrcById.payload.first != crcPayload.first ||
+		unpackedCrcById.payload.second != crcPayload.second)
+	{
+		std::println("CRC region_id roundtrip failed");
 		return 1;
 	}
 
