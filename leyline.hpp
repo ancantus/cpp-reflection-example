@@ -2,12 +2,16 @@
 
 #include <meta>
 
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <ranges>
+#include <span>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #include "utils.hpp"
 
@@ -29,6 +33,12 @@ struct endian
 inline constexpr endian little{byte_order::little};
 inline constexpr endian big{byte_order::big};
 } // namespace leyline::wire
+
+namespace leyline
+{
+template <typename T>
+consteval std::size_t packed_size();
+} // namespace leyline
 
 #include "leyline_impl.hpp"
 
@@ -82,6 +92,37 @@ consteval std::size_t packed_size()
     else if constexpr (std::is_array_v<T>)
     {
         return std::extent_v<T> * packed_size<std::remove_extent_t<T>>();
+    }
+    else if constexpr (detail::is_std_array_v<T>)
+    {
+        using ArrayType = std::remove_cvref_t<T>;
+        using ElementType = typename ArrayType::value_type;
+        return std::tuple_size_v<ArrayType> * packed_size<ElementType>();
+    }
+    else if constexpr (detail::is_span_v<T>)
+    {
+        using SpanType = std::remove_cvref_t<T>;
+        static_assert(SpanType::extent != std::dynamic_extent, "Only fixed-extent std::span<T, N> is supported.");
+        using ElementType = std::remove_cv_t<typename SpanType::element_type>;
+        return SpanType::extent * packed_size<ElementType>();
+    }
+    else if constexpr (std::is_pointer_v<std::remove_cvref_t<T>>)
+    {
+        using PointeeType = std::remove_cv_t<std::remove_pointer_t<std::remove_cvref_t<T>>>;
+        static_assert(!std::is_void_v<PointeeType>, "void pointers are not supported.");
+        static_assert(!std::is_function_v<PointeeType>, "function pointers are not supported.");
+        return 1U + packed_size<PointeeType>();
+    }
+    else if constexpr (detail::is_optional_v<T>)
+    {
+        using ValueType = typename std::remove_cvref_t<T>::value_type;
+        return 1U + packed_size<ValueType>();
+    }
+    else if constexpr (detail::is_variant_v<T>)
+    {
+        using VariantType = std::remove_cvref_t<T>;
+        using IndexType = detail::variant_index_for_t<VariantType>;
+        return sizeof(IndexType) + detail::variant_max_payload_size<VariantType>();
     }
     else
     {

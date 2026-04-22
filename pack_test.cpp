@@ -1,7 +1,10 @@
 #include <print>
 #include <array>
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <utility>
+#include <variant>
 #include "leyline.hpp"
 #include "print.hpp"
 
@@ -53,6 +56,15 @@ struct NetworkPacket
 	std::uint32_t checksum;
 
 	bool operator==(const NetworkPacket&) const noexcept = default;
+};
+
+struct IndirectFixedTypes
+{
+	std::array<std::uint16_t, 3> samples;
+	std::optional<std::uint32_t> maybeCounter;
+	std::variant<std::uint16_t, std::uint32_t> payload;
+	std::uint16_t* pointerValue;
+	std::span<std::uint16_t, 2> window;
 };
 
 int main()
@@ -120,6 +132,75 @@ int main()
 	if (packet != unpackedPacket)
 	{
 		std::println("NetworkPacket roundtrip failed");
+		return 1;
+	}
+
+	std::uint16_t pointerBacking = 0xCAFE;
+	std::array<std::uint16_t, 2> spanBacking{0x0A0B, 0x0C0D};
+	IndirectFixedTypes indirectFixed{
+		.samples = {0x0102, 0x0304, 0x0506},
+		.maybeCounter = 0x11223344U,
+		.payload = std::variant<std::uint16_t, std::uint32_t>{std::in_place_index<1>, 0x99AABBCCU},
+		.pointerValue = &pointerBacking,
+		.window = std::span<std::uint16_t, 2>{spanBacking},
+	};
+
+	std::array<std::uint8_t, leyline::packed_size<IndirectFixedTypes>()> indirectBytes{};
+	std::println("IndirectFixedTypes Size: {}, PackedSize: {}", sizeof(IndirectFixedTypes), indirectBytes.size());
+	leyline::pack(indirectFixed, indirectBytes);
+	std::println("IndirectFixedTypes bytes:");
+	print_hex_dump(indirectBytes);
+
+	std::uint16_t unpackedPointerBacking = 0;
+	std::array<std::uint16_t, 2> unpackedSpanBacking{};
+	IndirectFixedTypes unpackedIndirect{
+		.samples = {},
+		.maybeCounter = std::nullopt,
+		.payload = std::variant<std::uint16_t, std::uint32_t>{std::in_place_index<0>, 0U},
+		.pointerValue = &unpackedPointerBacking,
+		.window = std::span<std::uint16_t, 2>{unpackedSpanBacking},
+	};
+	leyline::unpack(unpackedIndirect, indirectBytes);
+
+	if (indirectFixed.samples != unpackedIndirect.samples ||
+		indirectFixed.maybeCounter != unpackedIndirect.maybeCounter ||
+		indirectFixed.payload != unpackedIndirect.payload ||
+		unpackedIndirect.pointerValue == nullptr ||
+		*unpackedIndirect.pointerValue != pointerBacking ||
+		spanBacking != unpackedSpanBacking)
+	{
+		std::println("IndirectFixedTypes roundtrip failed");
+		return 1;
+	}
+
+	std::array<std::uint16_t, 2> nullSpanBacking{0xDEAD, 0xBEEF};
+	IndirectFixedTypes nullableIndirect{
+		.samples = {0x1111, 0x2222, 0x3333},
+		.maybeCounter = std::nullopt,
+		.payload = std::variant<std::uint16_t, std::uint32_t>{std::in_place_index<0>, 0x4444},
+		.pointerValue = nullptr,
+		.window = std::span<std::uint16_t, 2>{nullSpanBacking},
+	};
+	std::array<std::uint8_t, leyline::packed_size<IndirectFixedTypes>()> nullableIndirectBytes{};
+	leyline::pack(nullableIndirect, nullableIndirectBytes);
+
+	std::uint16_t pointerThatWillBeCleared = 0xFFFF;
+	std::array<std::uint16_t, 2> unpackedNullSpanBacking{};
+	IndirectFixedTypes unpackedNullableIndirect{
+		.samples = {},
+		.maybeCounter = 0x1U,
+		.payload = std::variant<std::uint16_t, std::uint32_t>{std::in_place_index<1>, 0x77777777U},
+		.pointerValue = &pointerThatWillBeCleared,
+		.window = std::span<std::uint16_t, 2>{unpackedNullSpanBacking},
+	};
+	leyline::unpack(unpackedNullableIndirect, nullableIndirectBytes);
+
+	if (unpackedNullableIndirect.pointerValue != nullptr ||
+		unpackedNullableIndirect.maybeCounter.has_value() ||
+		unpackedNullableIndirect.payload != nullableIndirect.payload ||
+		nullSpanBacking != unpackedNullSpanBacking)
+	{
+		std::println("IndirectFixedTypes nullable roundtrip failed");
 		return 1;
 	}
 
