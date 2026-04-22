@@ -11,7 +11,6 @@
 #include <span>
 #include <type_traits>
 #include <utility>
-#include <variant>
 
 #include "utils.hpp"
 
@@ -72,32 +71,6 @@ struct is_optional<std::optional<Value>> : std::true_type
 template <typename T>
 inline constexpr bool is_optional_v = is_optional<std::remove_cvref_t<T>>::value;
 
-template <typename T>
-struct is_variant : std::false_type
-{
-};
-
-template <typename... Alternatives>
-struct is_variant<std::variant<Alternatives...>> : std::true_type
-{
-};
-
-template <typename T>
-inline constexpr bool is_variant_v = is_variant<std::remove_cvref_t<T>>::value;
-
-template <std::size_t Count>
-using variant_index_type_t = std::conditional_t<
-    (Count <= 0xFFU),
-    std::uint8_t,
-    std::conditional_t<(Count <= 0xFFFFU), std::uint16_t, std::conditional_t<(Count <= 0xFFFFFFFFULL), std::uint32_t, std::uint64_t>>
->;
-
-template <typename Variant>
-using variant_index_for_t = variant_index_type_t<std::variant_size_v<std::remove_cvref_t<Variant>>>;
-
-template <typename T>
-consteval std::size_t variant_max_payload_size();
-
 template <wire::byte_order Order, typename OutIt, typename T>
 constexpr void pack_impl(const T& input, OutIt& output);
 
@@ -150,49 +123,6 @@ constexpr void skip_bytes(std::size_t count, InIt& input)
     for (std::size_t i = 0U; i < count; ++i)
     {
         ++input;
-    }
-}
-
-template <typename Variant, std::size_t... I>
-consteval std::size_t variant_max_payload_size_impl(std::index_sequence<I...>)
-{
-    using VariantType = std::remove_cvref_t<Variant>;
-    std::size_t max_payload{0U};
-    ((max_payload = max_payload < ::leyline::packed_size<std::variant_alternative_t<I, VariantType>>()
-                        ? ::leyline::packed_size<std::variant_alternative_t<I, VariantType>>()
-                        : max_payload),
-     ...);
-    return max_payload;
-}
-
-template <typename Variant>
-consteval std::size_t variant_max_payload_size()
-{
-    using VariantType = std::remove_cvref_t<Variant>;
-    return variant_max_payload_size_impl<VariantType>(std::make_index_sequence<std::variant_size_v<VariantType>>{});
-}
-
-template <wire::byte_order Order, typename Variant, typename PayloadIt, std::size_t I = 0U>
-constexpr bool unpack_variant_alternative(std::size_t index, Variant& output, PayloadIt payload_begin)
-{
-    using VariantType = std::remove_cvref_t<Variant>;
-    if constexpr (I == std::variant_size_v<VariantType>)
-    {
-        return false;
-    }
-    else
-    {
-        if (index == I)
-        {
-            using AltType = std::variant_alternative_t<I, VariantType>;
-            AltType value{};
-            auto payload_it = payload_begin;
-            unpack_impl<Order>(value, payload_it);
-            output = std::move(value);
-            return true;
-        }
-
-        return unpack_variant_alternative<Order, Variant, PayloadIt, I + 1U>(index, output, payload_begin);
     }
 }
 
@@ -282,32 +212,6 @@ constexpr void pack_impl(const T& input, OutIt& output)
             write_zero_bytes(::leyline::packed_size<ValueType>(), output);
         }
     }
-    else if constexpr (is_variant_v<T>)
-    {
-        using VariantType = std::remove_cvref_t<T>;
-        using IndexType = variant_index_for_t<VariantType>;
-        constexpr std::size_t max_payload_size = variant_max_payload_size<VariantType>();
-
-        const IndexType index = static_cast<IndexType>(input.index());
-        pack_impl<Order>(index, output);
-
-        std::array<std::uint8_t, max_payload_size> payload{};
-        auto payload_it = payload.begin();
-        std::visit(
-            [&](const auto& value)
-            {
-                pack_impl<Order>(value, payload_it);
-            },
-            input
-        );
-
-        using OutputType = std::remove_cvref_t<std::iter_value_t<OutIt>>;
-        for (const auto byte : payload)
-        {
-            *output = static_cast<OutputType>(byte);
-            ++output;
-        }
-    }
     else if constexpr (std::is_class_v<T>)
     {
         constexpr auto ctx = std::meta::access_context::current();
@@ -320,7 +224,7 @@ constexpr void pack_impl(const T& input, OutIt& output)
     }
     else
     {
-        static_assert(always_false_v<T>, "pack() only supports fixed-size arithmetic, arrays/spans, pointers, optionals, variants, and recursively-reflected class members.");
+        static_assert(always_false_v<T>, "pack() only supports fixed-size arithmetic, arrays/spans, pointers, optionals, and recursively-reflected class members.");
     }
 }
 
@@ -408,27 +312,6 @@ constexpr void unpack_impl(T& output, InIt& input)
             output = std::move(value);
         }
     }
-    else if constexpr (is_variant_v<T>)
-    {
-        using VariantType = std::remove_cvref_t<T>;
-        using IndexType = variant_index_for_t<VariantType>;
-        constexpr std::size_t max_payload_size = variant_max_payload_size<VariantType>();
-
-        IndexType index{};
-        unpack_impl<Order>(index, input);
-
-        std::array<std::uint8_t, max_payload_size> payload{};
-        for (std::size_t i = 0U; i < payload.size(); ++i)
-        {
-            payload[i] = byte_to_u8(*input);
-            ++input;
-        }
-
-        if (!unpack_variant_alternative<Order>(static_cast<std::size_t>(index), output, payload.cbegin()))
-        {
-            std::abort();
-        }
-    }
     else if constexpr (std::is_class_v<T>)
     {
         constexpr auto ctx = std::meta::access_context::current();
@@ -441,7 +324,7 @@ constexpr void unpack_impl(T& output, InIt& input)
     }
     else
     {
-        static_assert(always_false_v<T>, "unpack() only supports fixed-size arithmetic, arrays/spans, pointers, optionals, variants, and recursively-reflected class members.");
+        static_assert(always_false_v<T>, "unpack() only supports fixed-size arithmetic, arrays/spans, pointers, optionals, and recursively-reflected class members.");
     }
 }
 } // namespace leyline::detail

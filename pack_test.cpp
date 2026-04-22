@@ -4,7 +4,6 @@
 #include <optional>
 #include <span>
 #include <utility>
-#include <variant>
 #include "leyline.hpp"
 #include "print.hpp"
 
@@ -62,7 +61,6 @@ struct IndirectFixedTypes
 {
 	std::array<std::uint16_t, 3> samples;
 	std::optional<std::uint32_t> maybeCounter;
-	std::variant<std::uint16_t, std::uint32_t> payload;
 	std::uint16_t* pointerValue;
 	std::span<std::uint16_t, 2> window;
 };
@@ -140,7 +138,6 @@ int main()
 	IndirectFixedTypes indirectFixed{
 		.samples = {0x0102, 0x0304, 0x0506},
 		.maybeCounter = 0x11223344U,
-		.payload = std::variant<std::uint16_t, std::uint32_t>{std::in_place_index<1>, 0x99AABBCCU},
 		.pointerValue = &pointerBacking,
 		.window = std::span<std::uint16_t, 2>{spanBacking},
 	};
@@ -156,7 +153,6 @@ int main()
 	IndirectFixedTypes unpackedIndirect{
 		.samples = {},
 		.maybeCounter = std::nullopt,
-		.payload = std::variant<std::uint16_t, std::uint32_t>{std::in_place_index<0>, 0U},
 		.pointerValue = &unpackedPointerBacking,
 		.window = std::span<std::uint16_t, 2>{unpackedSpanBacking},
 	};
@@ -164,7 +160,6 @@ int main()
 
 	if (indirectFixed.samples != unpackedIndirect.samples ||
 		indirectFixed.maybeCounter != unpackedIndirect.maybeCounter ||
-		indirectFixed.payload != unpackedIndirect.payload ||
 		unpackedIndirect.pointerValue == nullptr ||
 		*unpackedIndirect.pointerValue != pointerBacking ||
 		spanBacking != unpackedSpanBacking)
@@ -177,7 +172,6 @@ int main()
 	IndirectFixedTypes nullableIndirect{
 		.samples = {0x1111, 0x2222, 0x3333},
 		.maybeCounter = std::nullopt,
-		.payload = std::variant<std::uint16_t, std::uint32_t>{std::in_place_index<0>, 0x4444},
 		.pointerValue = nullptr,
 		.window = std::span<std::uint16_t, 2>{nullSpanBacking},
 	};
@@ -189,7 +183,6 @@ int main()
 	IndirectFixedTypes unpackedNullableIndirect{
 		.samples = {},
 		.maybeCounter = 0x1U,
-		.payload = std::variant<std::uint16_t, std::uint32_t>{std::in_place_index<1>, 0x77777777U},
 		.pointerValue = &pointerThatWillBeCleared,
 		.window = std::span<std::uint16_t, 2>{unpackedNullSpanBacking},
 	};
@@ -197,7 +190,6 @@ int main()
 
 	if (unpackedNullableIndirect.pointerValue != nullptr ||
 		unpackedNullableIndirect.maybeCounter.has_value() ||
-		unpackedNullableIndirect.payload != nullableIndirect.payload ||
 		nullSpanBacking != unpackedNullSpanBacking)
 	{
 		std::println("IndirectFixedTypes nullable roundtrip failed");

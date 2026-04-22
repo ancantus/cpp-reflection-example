@@ -11,7 +11,6 @@
 #include <span>
 #include <type_traits>
 #include <utility>
-#include <variant>
 
 #include "utils.hpp"
 
@@ -117,12 +116,6 @@ consteval std::size_t packed_size()
     {
         using ValueType = typename std::remove_cvref_t<T>::value_type;
         return 1U + packed_size<ValueType>();
-    }
-    else if constexpr (detail::is_variant_v<T>)
-    {
-        using VariantType = std::remove_cvref_t<T>;
-        using IndexType = detail::variant_index_for_t<VariantType>;
-        return sizeof(IndexType) + detail::variant_max_payload_size<VariantType>();
     }
     else
     {
