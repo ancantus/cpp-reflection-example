@@ -1,17 +1,41 @@
 #pragma once
 
-#include <meta>
+#include <cstdint>
+#include <cstdio>
+#include <array>
 
-/// @brief: Use in place of `enumerators_of()` to bypass bug in current gcc-trunk with the implementation in consteval contexts
-template <typename T>
-consteval auto enumerators_of()
-{
-  return std::define_static_array(std::meta::enumerators_of(^^T));
+namespace leyline {
+
+template <typename T, std::size_t N>
+constexpr void print_hex_dump(const std::array<T, N>& data) {
+    constexpr int hex_per_line = 16;
+    
+    for (std::size_t i = 0; i < N; ++i) {
+        printf("%02x", static_cast<unsigned char>(data[i]));
+        
+        if ((i + 1) % hex_per_line == 0) {
+            putchar(' ');
+            for (int j = 0; j < 8 - hex_per_line; ++j) {
+                putchar(' ');
+            }
+            putchar('\n');
+        } else {
+            putchar(' ');
+        }
+    }
 }
 
-template <typename T, typename CTX>
-consteval auto nonstatic_data_members_of(CTX ctx)
-{
-  return std::define_static_array(std::meta::nonstatic_data_members_of(^^T, ctx));
+template <typename T, std::size_t N>
+void print_hex_dump(const T (&data)[N]) {
+    constexpr int hex_per_line = 16;
+    
+    for (std::size_t i = 0; i < N; ++i) {
+        printf("%02x", static_cast<unsigned char>(data[i]));
+        
+        if ((i + 1) % hex_per_line == 0) {
+            putchar('\n');
+        } else {
+            putchar(' ');
+        }
+    }
 }
-

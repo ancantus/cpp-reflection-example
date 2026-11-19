@@ -13,8 +13,6 @@
 #include <type_traits>
 #include <utility>
 
-#include "utils.hpp"
-
 namespace leyline::detail
 {
 template <typename>
@@ -330,7 +328,7 @@ constexpr void pack_impl(const T& input, OutIt& output)
     else if constexpr (std::is_class_v<T>)
     {
         constexpr auto ctx = std::meta::access_context::current();
-        constexpr std::size_t member_count = nonstatic_data_members_of<T>(ctx).size();
+        constexpr std::size_t member_count = std::meta::nonstatic_data_members_of(^^T, ctx).size();
         constexpr auto type_order = resolved_byte_order(^^T, Order);
 
         std::array<std::byte, ::leyline::packed_size<T>()> packed_members{};
@@ -341,7 +339,7 @@ constexpr void pack_impl(const T& input, OutIt& output)
         std::size_t member_index = 0U;
         auto member_output = packed_members.begin();
 
-        template for (constexpr auto m : nonstatic_data_members_of<T>(ctx))
+        template for (constexpr auto m : std::meta::nonstatic_data_members_of(^^T, ctx))
         {
             using MemberType = typename[: std::meta::type_of(m) :];
             constexpr std::size_t member_size = ::leyline::packed_size<MemberType>();
@@ -529,7 +527,7 @@ constexpr void unpack_impl(T& output, InIt& input)
     {
         constexpr auto ctx = std::meta::access_context::current();
         constexpr auto type_order = resolved_byte_order(^^T, Order);
-        template for (constexpr auto m : nonstatic_data_members_of<T>(ctx))
+        template for (constexpr auto m : std::meta::nonstatic_data_members_of(^^T, ctx))
         {
             constexpr auto member_order = resolved_byte_order(m, type_order);
             unpack_impl<member_order>(output.[:m:], input);
